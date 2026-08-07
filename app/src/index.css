@@ -12,3 +12,9 @@ html, body, #root {
 body {
   font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
 }
+
+@layer components {
+  .input {
+    @apply w-full rounded-md bg-neutral-900 border border-neutral-700 px-2 py-1.5 text-sm outline-none focus:border-emerald-500;
+  }
+}
