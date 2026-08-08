@@ -1,7 +1,7 @@
 # WhatsApp Outreach Campaign — Ikan Group
 
 Automation for reaching business leads on WhatsApp: import a CSV lead list, send an
-approved first-touch template, let an AI (styled as "John from Ikan Group") carry the
+approved first-touch template, let an AI (styled as "Sophie from Ikan Group") carry the
 conversation through a niche-specific pitch, flag hot leads for hand-off, and monitor
 everything from a custom WhatsApp-style inbox — since the sending number can't be
 logged into a normal WhatsApp client at the same time it's running automation.
