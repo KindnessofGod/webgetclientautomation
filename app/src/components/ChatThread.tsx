@@ -48,6 +48,30 @@ export default function ChatThread() {
     setDraft('')
   }
 
+  async function onSendPdf() {
+    if (!detail) return
+    const url = window.prompt('Paste a public PDF URL to send (e.g. a company profile or lead magnet):')
+    if (!url || !url.trim()) return
+    const caption = window.prompt('Optional caption for this document:') ?? ''
+    setSending(true)
+    setSendError(null)
+    if (!detail.human_takeover) {
+      await setTakeover(true)
+    }
+    const result = await sendManualMessage({
+      conversationId: detail.id,
+      leadId: detail.lead_id,
+      phoneE164: detail.phone_e164,
+      body: caption,
+      mediaUrl: url.trim(),
+      caption,
+    })
+    setSending(false)
+    if (!result.ok) {
+      setSendError(result.error ?? 'Failed to send PDF')
+    }
+  }
+
   return (
     <div className="flex-1 flex flex-col h-full min-w-0">
       <div className="border-b border-neutral-800 px-4 py-2.5 flex items-center justify-between shrink-0">
@@ -87,6 +111,15 @@ export default function ChatThread() {
           </p>
         )}
         <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={sending}
+            onClick={onSendPdf}
+            title="Send a PDF (company profile, lead magnet, etc.)"
+            className="rounded-md border border-neutral-700 hover:border-neutral-500 disabled:opacity-50 px-3 py-2 text-sm"
+          >
+            📎
+          </button>
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}

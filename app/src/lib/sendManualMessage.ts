@@ -9,6 +9,8 @@ export async function sendManualMessage(params: {
   leadId: string
   phoneE164: string
   body: string
+  mediaUrl?: string
+  caption?: string
 }): Promise<{ ok: boolean; error?: string }> {
   if (!webhookUrl) {
     return { ok: false, error: 'VITE_N8N_MANUAL_SEND_WEBHOOK_URL is not configured — see README for n8n setup.' }
@@ -22,6 +24,8 @@ export async function sendManualMessage(params: {
         lead_id: params.leadId,
         phone_e164: params.phoneE164,
         body: params.body,
+        media_url: params.mediaUrl,
+        caption: params.caption,
       }),
     })
     if (!res.ok) return { ok: false, error: `n8n webhook returned ${res.status}` }
