@@ -201,6 +201,19 @@ place).
 
 ## 8. Open / pending work for opencode to pick up
 
+**⚠️ SECURITY REMINDER — NOT YET DONE**: The Telegram bot token for lead
+notifications (`iKANWEBLEADbot`, used to DM Kindness on Telegram whenever a
+lead's intent is classified `interested`) is currently hardcoded in plain
+text in the `Notify Kindness (Telegram)` HTTP Request node's URL inside the
+`WA Inbound — Reply Handler` workflow (`If8jiQRRvIm6Zyks`), because n8n
+credential creation isn't reachable through the MCP tools (only through the
+n8n UI). Anyone with edit access to that workflow can read the token in
+plain text. **Fix**: in the n8n UI, create a proper Telegram API credential
+with that bot token, then update the `Notify Kindness (Telegram)` node to
+use it (via the native Telegram node or an `httpBasicAuth`/header
+credential) instead of the token sitting in the URL, and rotate the token
+with @BotFather afterward since it's been exposed in chat/workflow history.
+
 In rough priority order:
 
 1. **Finish "simulate the entire process" (interrupted mid-task)**: The
