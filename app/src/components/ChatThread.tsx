@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMessages } from '../lib/useMessages'
 import { useConversationDetail } from '../lib/useConversationDetail'
@@ -15,6 +15,8 @@ export default function ChatThread() {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const [uploadProgress, setUploadProgress] = useState<string | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const dragCounter = useRef(0)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -55,11 +57,8 @@ export default function ChatThread() {
     fileInputRef.current?.click()
   }
 
-  async function onFileSelected(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file || !detail) return
-
+  async function sendFile(file: File) {
+    if (!detail) return
     setSending(true)
     setSendError(null)
     setUploadProgress('Uploading…')
@@ -97,8 +96,55 @@ export default function ChatThread() {
     }
   }
 
+  async function onFileSelected(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    await sendFile(file)
+  }
+
+  function onDragEnter(e: DragEvent) {
+    e.preventDefault()
+    if (!e.dataTransfer.types.includes('Files')) return
+    dragCounter.current += 1
+    setIsDragging(true)
+  }
+
+  function onDragOver(e: DragEvent) {
+    e.preventDefault()
+  }
+
+  function onDragLeave(e: DragEvent) {
+    e.preventDefault()
+    dragCounter.current -= 1
+    if (dragCounter.current <= 0) {
+      dragCounter.current = 0
+      setIsDragging(false)
+    }
+  }
+
+  async function onDrop(e: DragEvent) {
+    e.preventDefault()
+    dragCounter.current = 0
+    setIsDragging(false)
+    const file = e.dataTransfer.files?.[0]
+    if (!file) return
+    await sendFile(file)
+  }
+
   return (
-    <div className="flex-1 flex flex-col h-full min-w-0">
+    <div
+      className="flex-1 flex flex-col h-full min-w-0 relative"
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {isDragging && (
+        <div className="absolute inset-0 z-10 bg-emerald-950/70 border-2 border-dashed border-emerald-500 rounded-md flex items-center justify-center pointer-events-none">
+          <p className="text-sm font-medium text-emerald-300">Drop file to send</p>
+        </div>
+      )}
       <div className="border-b border-neutral-800 px-4 py-2.5 flex items-center justify-between shrink-0">
         <div>
           <p className="text-sm font-medium">{detail.business_name || detail.phone_e164}</p>
