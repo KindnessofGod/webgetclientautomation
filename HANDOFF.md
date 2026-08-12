@@ -240,26 +240,41 @@ quality dips), 200 first-touch sent, 46 replied. `follow_up_1`
 (`not_replied_to1st_pitch_day2`) was flipped to `active: true` — verified
 Meta-accepted send exists for it (see section 5).
 
-Remaining open items, in rough priority order:
+**F-4 and F-5 — RESOLVED.** F-4 (no pitch/offer templates): both now exist
+and are `active: true` (added by the other session). F-5 (daily-cap reset
+using UTC instead of Africa/Lagos midnight): fixed 2026-08-12 — `Count Sent
+Today` in `z3KarZgzcxfB1azz` now filters `created_at >= {{ $now.setZone
+('Africa/Lagos').startOf('day').toUTC().toISO() }}` instead of
+`$today.toISO()` (which was UTC midnight from the n8n instance default
+timezone). Verified live via execution 2335: ran clean, `sentToday: 1`
+matched the correct Lagos-day window, `withinWindow: false` correctly
+reflected it being outside the 06:00-21:00 Lagos send window at test time.
 
-1. **F-4**: No `pitch`/`offer` templates — **now resolved**, both exist and
-   are `active: true` (added by the other session).
-2. **F-5**: `Compute Pacing`'s daily-cap-reset boundary likely still uses
-   UTC day boundaries rather than `Africa/Lagos`. Not yet verified fixed —
-   check `Count Sent Today`'s `created_at gte $today.toISO()` filter in
-   `z3KarZgzcxfB1azz` against Lagos-local midnight.
-3. **F-6**: No conversion-funnel / stats view in the dashboard. Still open,
-   not asked for yet.
-4. **Vercel env var unverified**: could not confirm
+**Health check (2026-08-12, end of session)**: no error/crashed executions
+on any of the 5 workflows since 19:00 UTC — the duplicate-reply fix, the
+debounce revert, the 3 Telegram credential swaps, and the F-5 timezone fix
+are all confirmed stable in production.
+
+Remaining open items, genuinely need the user (not blocked on tooling):
+
+1. **F-6**: No conversion-funnel / stats view in the dashboard. Open,
+   nobody's asked for it built yet.
+2. **Vercel env var unverified**: could not confirm
    `VITE_N8N_MANUAL_SEND_WEBHOOK_URL` on the `ikan-outreach-inbox` Vercel
    project actually points at the current `/wa-manual-send-v2` webhook path
    — the platform's safety classifier blocked a curl call using a
-   user-pasted Vercel token before this could be checked. Worth confirming
-   manually in the Vercel dashboard.
-5. **`follow_up_2`/`follow_up_3` active flags**: `follow_up_3` was flipped
+   user-pasted Vercel token before this could be checked, and that block
+   should be respected rather than routed around. Check manually in the
+   Vercel dashboard, or grant a Bash permission rule if you want it
+   re-attempted via API.
+3. **`follow_up_2`/`follow_up_3` active flags**: `follow_up_3` was flipped
    active by the other session without the same kind of verification
    `follow_up_1` got. Worth confirming real Meta approval status for both in
-   WhatsApp Manager.
+   WhatsApp Manager before relying on them.
+4. **Rotate the Vercel token** pasted into chat earlier this session, same
+   reasoning as the Telegram token (already rotated) — it's sat in
+   conversation history since being shared, independent of whether it's
+   still valid.
 
 ## 9. Working style established this session (carry forward)
 
