@@ -199,66 +199,67 @@ completion or the section-5 finding — should be redeployed if the user wants
 it kept current (same `file_path` via the `Artifact` tool updates it in
 place).
 
-## 8. Open / pending work for opencode to pick up
+## 8. Open / pending work
 
-**⚠️ SECURITY REMINDER — NOT YET DONE**: The Telegram bot token for lead
-notifications (`iKANWEBLEADbot`, used to DM Kindness on Telegram whenever a
-lead's intent is classified `interested`) is currently hardcoded in plain
-text in the `Notify Kindness (Telegram)` HTTP Request node's URL inside the
-`WA Inbound — Reply Handler` workflow (`If8jiQRRvIm6Zyks`), because n8n
-credential creation isn't reachable through the MCP tools (only through the
-n8n UI). Anyone with edit access to that workflow can read the token in
-plain text. **Fix**: in the n8n UI, create a proper Telegram API credential
-with that bot token, then update the `Notify Kindness (Telegram)` node to
-use it (via the native Telegram node or an `httpBasicAuth`/header
-credential) instead of the token sitting in the URL, and rotate the token
-with @BotFather afterward since it's been exposed in chat/workflow history.
+**Telegram bot token — RESOLVED (2026-08-12).** User rotated the token with
+@BotFather and created a proper `telegramApi` credential in the n8n UI
+(`iKANWEBLEADbot`, id `UjOTEdNBpZUKW3Z2`). All 3 places that had the token
+hardcoded in plaintext (`Notify Kindness (Telegram)` in the inbound
+workflow, `Send Error Telegram Alert` in the outbound workflow, `Send
+Telegram Alert` in the `Ops Alerts — Telegram` workflow) were swapped from
+raw HTTP Request nodes to native `n8n-nodes-base.telegram` nodes using that
+credential. No plaintext token remains in any workflow JSON. All three
+published and live.
 
-In rough priority order:
+**Duplicate-AI-reply bug — FIXED (2026-08-12).** A lead ("Abdul Phone
+Accessories") got the same pitch+PDF sequence sent twice, because two
+inbound messages arriving >25s apart (past the debounce window) each
+independently passed the idempotency "claim" step — the claim update used a
+correct compare-and-swap WHERE clause, but nothing downstream checked
+whether the update actually matched/returned a row before proceeding to
+send. Root-caused via `get_execution` + full node/connection trace on
+`If8jiQRRvIm6Zyks`. Fixed by adding a `Claim Succeeded?` IF gate right after
+`Claim Inbound Message (Idempotency Lock)` that only proceeds to
+`Split Reply Into Bubbles` if `Boolean($json.id)` — i.e. the claim actually
+won a row. Debounce window (`Debounce Burst Window` node) was briefly
+changed 25s→10s then reverted back to 25s per user request; this number is
+now purely a UX/bundling knob, not a safety net — the claim gate is what
+actually prevents duplicates regardless of its value.
 
-1. **Finish "simulate the entire process" (interrupted mid-task)**: The
-   inbound conversation path (`interested` intent → hot-lead handoff →
-   `human_takeover` silencing) has NOT been live-tested this session,
-   because `execute_workflow` cannot trigger the `whatsAppTrigger` node
-   (confirmed tool limitation, see section 3 table). Two options were
-   presented to the user and no answer was received before this handoff:
-   (a) ask the user to send one more real WhatsApp message like "yeah I'd
-   love to see what you can put together" to the test number, and watch the
-   execution live to confirm `Update Stage: Hot Lead + Handoff`,
-   `Mark Lead Hot`, `Log Hot Lead Event` all fire, and that a subsequent
-   follow-up doesn't get an AI reply once `human_takeover=true`; or
-   (b) run `mcp__n8n__test_workflow` with `prepare_test_pin_data` as a
-   non-live, mechanical-only dry run (no real OpenAI/WhatsApp calls).
-2. **Report section 5's finding to the user** if not already done — the
-   `follow_up_1` template is apparently Meta-approved but flagged inactive
-   in the DB.
-3. **F-4**: No `pitch` or `offer` stage message templates exist at all.
-   User has not yet asked for copy to be drafted; offer to help if asked.
-4. **F-5**: `Compute Pacing`'s daily-cap-reset boundary likely uses UTC day
-   boundaries rather than `Africa/Lagos`, meaning the cap could reset at the
-   wrong local time. Recommended fix: use `$today.setZone('Africa/Lagos')`
-   for the day-boundary comparison wherever `sentToday` is computed. Not yet
-   applied.
-5. **F-6**: No conversion-funnel / stats view exists in the dashboard
-   (`app/src/` — only `ConversationList.tsx`, `useHotLeadAlerts.ts`,
-   `format.ts`, `database.types.ts` are relevant, confirmed via grep). User
-   has not asked for this to be built yet; offer to build if asked.
-6. **`daily_send_cap` is still 100**, not raised toward the real 2000/day
-   target. Recommended staged rollout: 100 → 250 → 500 → 1000 → 2000,
-   watching quality rating / block rate at each step before advancing. User
-   has not yet confirmed a rollout plan.
-7. **`whatsapp_tier_limit` in `campaign_settings` still says 1000**; user
-   confirmed their real approved tier is 2000. Trivial fix — update the row
-   — just hasn't been done (low priority, cosmetic/documentation only, not
-   used in `canSend` gating logic as far as verified).
-8. **Real lead list not imported** — only the test lead exists in `leads`.
-   User needs to provide their real 500-2000 lead list (CSV import exists in
-   the dashboard per commit history: "Build WhatsApp-style inbox: ...
-   leads CSV import/export").
-9. **Dashboard deployment currency**: confirm the Vercel deployment reflects
-   the latest committed dashboard code (`vercel.json` was added in a recent
-   commit for one-click deploy — verify it's actually been deployed, not
-   just committed).
+**Branches consolidated.** `claude/whatsapp-automation-campaign-vuq6b0` was
+fast-forwarded to match `claude/handoff-doc-o3ehx9` (the branch another
+session did significant work on — dashboard Replies/Unqualified tabs,
+drag-and-drop file sending, pitch/offer templates, real lead import) and
+pushed. Both branches now point at the same history. The dead orphaned
+`WA Manual Send — Dashboard v2` workflow (`bQepIWzDMIrApZfR`) was archived.
+
+**Campaign is live, not just tested.** As of 2026-08-12: 250 real leads
+imported, `daily_send_cap` and `whatsapp_tier_limit` both raised to **2000**
+(skipped the staged-rollout recommendation — worth revisiting if delivery
+quality dips), 200 first-touch sent, 46 replied. `follow_up_1`
+(`not_replied_to1st_pitch_day2`) was flipped to `active: true` — verified
+Meta-accepted send exists for it (see section 5).
+
+Remaining open items, in rough priority order:
+
+1. **F-4**: No `pitch`/`offer` templates — **now resolved**, both exist and
+   are `active: true` (added by the other session).
+2. **F-5**: `Compute Pacing`'s daily-cap-reset boundary likely still uses
+   UTC day boundaries rather than `Africa/Lagos`. Not yet verified fixed —
+   check `Count Sent Today`'s `created_at gte $today.toISO()` filter in
+   `z3KarZgzcxfB1azz` against Lagos-local midnight.
+3. **F-6**: No conversion-funnel / stats view in the dashboard. Still open,
+   not asked for yet.
+4. **Vercel env var unverified**: could not confirm
+   `VITE_N8N_MANUAL_SEND_WEBHOOK_URL` on the `ikan-outreach-inbox` Vercel
+   project actually points at the current `/wa-manual-send-v2` webhook path
+   — the platform's safety classifier blocked a curl call using a
+   user-pasted Vercel token before this could be checked. Worth confirming
+   manually in the Vercel dashboard.
+5. **`follow_up_2`/`follow_up_3` active flags**: `follow_up_3` was flipped
+   active by the other session without the same kind of verification
+   `follow_up_1` got. Worth confirming real Meta approval status for both in
+   WhatsApp Manager.
 
 ## 9. Working style established this session (carry forward)
 
