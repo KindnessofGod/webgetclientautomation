@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMessages } from '../lib/useMessages'
 import { useConversationDetail } from '../lib/useConversationDetail'
 import { sendManualMessage } from '../lib/sendManualMessage'
+import { supabase } from '../lib/supabaseClient'
 import MessageBubble from './MessageBubble'
 import { stageColor, stageLabel } from '../lib/format'
 
@@ -13,7 +14,9 @@ export default function ChatThread() {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -48,27 +51,49 @@ export default function ChatThread() {
     setDraft('')
   }
 
-  async function onSendPdf() {
-    if (!detail) return
-    const url = window.prompt('Paste a public PDF URL to send (e.g. a company profile or lead magnet):')
-    if (!url || !url.trim()) return
-    const caption = window.prompt('Optional caption for this document:') ?? ''
+  function onPickFile() {
+    fileInputRef.current?.click()
+  }
+
+  async function onFileSelected(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !detail) return
+
     setSending(true)
     setSendError(null)
-    if (!detail.human_takeover) {
-      await setTakeover(true)
-    }
-    const result = await sendManualMessage({
-      conversationId: detail.id,
-      leadId: detail.lead_id,
-      phoneE164: detail.phone_e164,
-      body: caption,
-      mediaUrl: url.trim(),
-      caption,
-    })
-    setSending(false)
-    if (!result.ok) {
-      setSendError(result.error ?? 'Failed to send PDF')
+    setUploadProgress('Uploading…')
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const path = `manual-sends/${detail.id}-${Date.now()}-${safeName}`
+      const { error: uploadError } = await supabase.storage.from('assets').upload(path, file, {
+        contentType: file.type || 'application/octet-stream',
+      })
+      if (uploadError) {
+        setSendError(`Upload failed: ${uploadError.message}`)
+        return
+      }
+      const { data: publicUrlData } = supabase.storage.from('assets').getPublicUrl(path)
+
+      setUploadProgress('Sending…')
+      if (!detail.human_takeover) {
+        await setTakeover(true)
+      }
+      const result = await sendManualMessage({
+        conversationId: detail.id,
+        leadId: detail.lead_id,
+        phoneE164: detail.phone_e164,
+        body: file.name,
+        mediaUrl: publicUrlData.publicUrl,
+        caption: file.name,
+        fileName: file.name,
+      })
+      if (!result.ok) {
+        setSendError(result.error ?? 'Failed to send file')
+      }
+    } finally {
+      setSending(false)
+      setUploadProgress(null)
     }
   }
 
@@ -105,17 +130,19 @@ export default function ChatThread() {
 
       <form onSubmit={onSend} className="border-t border-neutral-800 p-3 shrink-0">
         {sendError && <p className="text-xs text-red-400 mb-1.5">{sendError}</p>}
+        {uploadProgress && <p className="text-xs text-neutral-400 mb-1.5">{uploadProgress}</p>}
         {!detail.human_takeover && (
           <p className="text-xs text-amber-400/80 mb-1.5">
             AI is currently handling this chat. Sending will hand control to you.
           </p>
         )}
         <div className="flex gap-2">
+          <input ref={fileInputRef} type="file" onChange={onFileSelected} className="hidden" />
           <button
             type="button"
             disabled={sending}
-            onClick={onSendPdf}
-            title="Send a PDF (company profile, lead magnet, etc.)"
+            onClick={onPickFile}
+            title="Send a file (PDF, image, etc.)"
             className="rounded-md border border-neutral-700 hover:border-neutral-500 disabled:opacity-50 px-3 py-2 text-sm"
           >
             📎
