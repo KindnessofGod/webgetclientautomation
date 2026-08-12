@@ -110,7 +110,10 @@ export default function ChatThread() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setUnqualified(detail.stage !== 'unqualified')}
+            onClick={async () => {
+              const result = await setUnqualified(detail.stage !== 'unqualified')
+              if (!result.ok) setSendError(result.error ?? 'Failed to update')
+            }}
             className={`text-xs px-3 py-1.5 rounded-md border ${
               detail.stage === 'unqualified'
                 ? 'border-red-500 text-red-300 bg-red-500/10'
@@ -120,7 +123,10 @@ export default function ChatThread() {
             {detail.stage === 'unqualified' ? 'Unqualified — reactivate' : 'Mark unqualified'}
           </button>
           <button
-            onClick={() => setTakeover(!detail.human_takeover)}
+            onClick={async () => {
+              const result = await setTakeover(!detail.human_takeover)
+              if (!result.ok) setSendError(result.error ?? 'Failed to update')
+            }}
             className={`text-xs px-3 py-1.5 rounded-md border ${
               detail.human_takeover
                 ? 'border-sky-500 text-sky-300 bg-sky-500/10'

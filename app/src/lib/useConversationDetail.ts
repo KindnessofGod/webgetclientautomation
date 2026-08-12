@@ -28,14 +28,20 @@ export function useConversationDetail(conversationId: string | undefined) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId])
 
-  async function setTakeover(takeover: boolean) {
-    if (!conversationId) return
-    await supabase.from('conversations').update({ human_takeover: takeover, ai_enabled: !takeover }).eq('id', conversationId)
+  async function setTakeover(takeover: boolean): Promise<{ ok: boolean; error?: string }> {
+    if (!conversationId) return { ok: false, error: 'No conversation selected' }
+    const { error } = await supabase
+      .from('conversations')
+      .update({ human_takeover: takeover, ai_enabled: !takeover })
+      .eq('id', conversationId)
+    if (error) return { ok: false, error: error.message }
+    await load()
+    return { ok: true }
   }
 
-  async function setUnqualified(unqualified: boolean) {
-    if (!conversationId) return
-    await supabase
+  async function setUnqualified(unqualified: boolean): Promise<{ ok: boolean; error?: string }> {
+    if (!conversationId) return { ok: false, error: 'No conversation selected' }
+    const { error } = await supabase
       .from('conversations')
       .update(
         unqualified
@@ -43,6 +49,9 @@ export function useConversationDetail(conversationId: string | undefined) {
           : { stage: 'awaiting_confirmation', ai_enabled: !detail?.human_takeover },
       )
       .eq('id', conversationId)
+    if (error) return { ok: false, error: error.message }
+    await load()
+    return { ok: true }
   }
 
   return { detail, setTakeover, setUnqualified, refresh: load }
