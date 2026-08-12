@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './lib/AuthContext'
 import Login from './pages/Login'
 import Inbox from './pages/Inbox'
 import Leads from './pages/Leads'
+import Replies from './pages/Replies'
 import Settings from './pages/Settings'
 import Shell from './components/Shell'
 
@@ -28,6 +29,7 @@ function AppRoutes() {
         <Route path="/" element={<Inbox />} />
         <Route path="/conversation/:id" element={<Inbox />} />
         <Route path="/leads" element={<Leads />} />
+        <Route path="/replies" element={<Replies />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

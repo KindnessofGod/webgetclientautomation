@@ -8,6 +8,7 @@ import { sendFollowUpDecision } from '../lib/sendFollowUpDecision'
 const navItems = [
   { to: '/', label: 'Inbox', end: true },
   { to: '/leads', label: 'Leads' },
+  { to: '/replies', label: 'Replies' },
   { to: '/settings', label: 'Settings' },
 ]
 
