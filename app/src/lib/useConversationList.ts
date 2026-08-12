@@ -17,6 +17,7 @@ export interface ConversationSummary {
   last_message_body: string | null
   last_message_direction: 'inbound' | 'outbound' | null
   last_message_at: string | null
+  last_inbound_at: string | null
 }
 
 export function useConversationList() {
@@ -24,10 +25,15 @@ export function useConversationList() {
   const [loading, setLoading] = useState(true)
 
   async function load() {
+    // Ongoing conversations (someone has actually replied) are sorted to the
+    // top by their last reply time; leads that only ever got the cold
+    // first-touch outbound sort below, by send time. Otherwise a big batch
+    // send buries real replies under a flood of fresh, untouched outreach.
     const { data, error } = await supabase
       .from('conversation_list')
       .select('*')
-      .order('updated_at', { ascending: false })
+      .order('last_inbound_at', { ascending: false, nullsFirst: false })
+      .order('last_message_at', { ascending: false })
       .limit(500)
     if (!error && data) setConversations(data as unknown as ConversationSummary[])
     setLoading(false)
