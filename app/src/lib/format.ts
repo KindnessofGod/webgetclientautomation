@@ -26,6 +26,7 @@ const STAGE_LABEL: Record<string, string> = {
   hot_lead: 'Hot lead',
   handed_off: 'Handed off',
   closed: 'Closed',
+  unqualified: 'Unqualified',
 }
 
 export function stageLabel(stage: string): string {
@@ -42,6 +43,8 @@ export function stageColor(stage: string): string {
     case 'not_interested':
     case 'closed':
       return 'bg-neutral-700/40 text-neutral-400 border-neutral-600/40'
+    case 'unqualified':
+      return 'bg-red-500/10 text-red-400 border-red-500/30'
     case 'new':
       return 'bg-sky-500/20 text-sky-300 border-sky-500/40'
     default:

@@ -9,6 +9,7 @@ const FILTERS = [
   { key: 'hot_lead', label: 'Hot leads' },
   { key: 'needs_reply', label: 'Needs reply' },
   { key: 'handed_off', label: 'Handed off' },
+  { key: 'unqualified', label: 'Unqualified' },
 ]
 
 export default function ConversationList({ conversations }: { conversations: ConversationSummary[] }) {
@@ -16,6 +17,10 @@ export default function ConversationList({ conversations }: { conversations: Con
   const [query, setQuery] = useState('')
 
   const filtered = conversations.filter((c) => {
+    // Unqualified chats are parked out of the way: they only show up under
+    // their own tab, never mixed into All or Replied.
+    if (filter !== 'unqualified' && c.stage === 'unqualified') return false
+    if (filter === 'unqualified' && c.stage !== 'unqualified') return false
     if (filter === 'replied' && !c.last_inbound_at) return false
     if (filter === 'hot_lead' && c.stage !== 'hot_lead') return false
     if (filter === 'handed_off' && c.stage !== 'handed_off') return false

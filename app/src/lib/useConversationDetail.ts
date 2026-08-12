@@ -33,5 +33,17 @@ export function useConversationDetail(conversationId: string | undefined) {
     await supabase.from('conversations').update({ human_takeover: takeover, ai_enabled: !takeover }).eq('id', conversationId)
   }
 
-  return { detail, setTakeover, refresh: load }
+  async function setUnqualified(unqualified: boolean) {
+    if (!conversationId) return
+    await supabase
+      .from('conversations')
+      .update(
+        unqualified
+          ? { stage: 'unqualified', ai_enabled: false }
+          : { stage: 'awaiting_confirmation', ai_enabled: !detail?.human_takeover },
+      )
+      .eq('id', conversationId)
+  }
+
+  return { detail, setTakeover, setUnqualified, refresh: load }
 }

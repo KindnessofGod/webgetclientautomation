@@ -20,7 +20,15 @@ export default function MessageBubble({ message }: { message: Message }) {
           <p>{message.body}</p>
         )}
         <div className="flex items-center gap-1.5 mt-1 justify-end">
-          {senderLabel && <span className="text-[10px] opacity-60">{senderLabel}</span>}
+          {senderLabel && (
+            <span
+              className={`text-[10px] px-1 rounded font-medium ${
+                message.sent_by === 'human' ? 'bg-sky-500/20 text-sky-300' : 'bg-neutral-600/30 text-neutral-300'
+              }`}
+            >
+              {senderLabel}
+            </span>
+          )}
           <span className="text-[10px] opacity-50">{clockTime(message.created_at)}</span>
           {isOut && message.status === 'failed' && <span className="text-[10px] text-red-400">failed</span>}
           {isOut && message.status === 'read' && <span className="text-[10px] text-sky-300">✓✓</span>}

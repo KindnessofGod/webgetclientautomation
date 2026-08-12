@@ -10,7 +10,7 @@ import { stageColor, stageLabel } from '../lib/format'
 export default function ChatThread() {
   const { id } = useParams<{ id: string }>()
   const { messages } = useMessages(id)
-  const { detail, setTakeover } = useConversationDetail(id)
+  const { detail, setTakeover, setUnqualified } = useConversationDetail(id)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
@@ -108,16 +108,28 @@ export default function ChatThread() {
             {detail.niche_name && <span className="text-xs text-neutral-500">· {detail.niche_name}</span>}
           </div>
         </div>
-        <button
-          onClick={() => setTakeover(!detail.human_takeover)}
-          className={`text-xs px-3 py-1.5 rounded-md border ${
-            detail.human_takeover
-              ? 'border-sky-500 text-sky-300 bg-sky-500/10'
-              : 'border-neutral-700 text-neutral-300 hover:border-neutral-500'
-          }`}
-        >
-          {detail.human_takeover ? 'You are in control — hand back to AI' : 'Take over this chat'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setUnqualified(detail.stage !== 'unqualified')}
+            className={`text-xs px-3 py-1.5 rounded-md border ${
+              detail.stage === 'unqualified'
+                ? 'border-red-500 text-red-300 bg-red-500/10'
+                : 'border-neutral-700 text-neutral-300 hover:border-neutral-500'
+            }`}
+          >
+            {detail.stage === 'unqualified' ? 'Unqualified — reactivate' : 'Mark unqualified'}
+          </button>
+          <button
+            onClick={() => setTakeover(!detail.human_takeover)}
+            className={`text-xs px-3 py-1.5 rounded-md border ${
+              detail.human_takeover
+                ? 'border-sky-500 text-sky-300 bg-sky-500/10'
+                : 'border-neutral-700 text-neutral-300 hover:border-neutral-500'
+            }`}
+          >
+            {detail.human_takeover ? 'You are in control — hand back to AI' : 'Take over this chat'}
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
