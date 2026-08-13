@@ -295,3 +295,122 @@ Remaining open items, genuinely need the user (not blocked on tooling):
 - Prefer explicit `$("NodeName").item.json.field` references over implicit
   `$json` anywhere an upstream node has `onError: continueRegularOutput` —
   the error object silently replaces `$json` for that item.
+
+## 10. Second bug-hunt pass (2026-08-13) — found via real conversation review
+
+The user reviewed live conversations in the dashboard and reported several
+issues by pasting screenshots of real chats. Each was root-caused against
+real n8n execution data before fixing, not assumed. All fixed and published.
+
+1. **Total silence on a matched "auto-reply" message — FIXED.** "The
+   waterside venue lekki" sent "How may we help you?", which matched the
+   `Looks Like Auto-Reply?` regex (meant to detect WhatsApp Business bot
+   greetings). The workflow **never replied and never would have** —
+   confirmed via the exact execution trace (id 1956): the IF node fired
+   correctly, but the downstream node wired from BOTH its outputs never
+   ran, despite the connection existing in the workflow JSON. A sibling
+   execution for the same lead's prior message (the false branch) worked
+   fine with identical wiring — this is an n8n engine quirk with two
+   branches converging on one node, not a logic bug in the regex. Fixed by
+   removing the IF node from the send path entirely and wiring
+   `Log Inbound Message` directly to `Mark Lead Replied` — one
+   unconditional path, no branch-merge ambiguity possible. This lead was
+   still sitting unanswered when found; needs a manual reply since the
+   pipeline won't retry on its own.
+2. **Non-text inbound messages silently became blank — FIXED.** Marisco
+   Hair and Nail Studio sent two voice notes; Aimas Garden forwarded a PDF.
+   `Normalize Inbound Message` only ever read `.text.body`, and
+   `Log Inbound Message` hardcoded `message_type: "text"` — so anything
+   that wasn't a plain text message logged as an empty string, the
+   dashboard showed a blank bubble, and the AI drafted replies based on
+   nothing (explains why some AI replies were generic guesses). Both
+   confirmed via raw WhatsApp webhook payloads pulled from n8n execution
+   history (`type: "audio", voice: true` / `type: "document"`). Fixed:
+   `Normalize Inbound Message` now detects the real WhatsApp message type
+   (text/interactive/image/document/audio/video/sticker/location/contacts/
+   reaction) and produces a readable placeholder (`[Voice message]`,
+   `[Document: filename]`, etc.) plus the correct `message_type` for the DB
+   constraint. Interactive button/list replies are treated as real text
+   since their title IS the meaningful content. **Does not yet
+   download/display the actual media** — see section 11, item 1.
+3. **Delivery-failure reason silently discarded — FIXED.** Happiness Unisex
+   Beauty Salon's first-touch showed `status: 'failed'` in the UI with no
+   explanation (`messages.error` was `null`). Root cause: the send itself
+   succeeded at the API level (Meta returned `message_status: "accepted"`,
+   confirmed via the batch execution trace) — it failed asynchronously
+   later, and `Extract Status Updates`'s code only ever captured
+   `{id, status}` from Meta's status webhook, discarding the `errors` array
+   that explains why. The original reason for this specific incident is
+   unrecoverable — it was thrown away before ever reaching the database.
+   Fixed going forward: `Extract Status Updates` now keeps `errors`,
+   `Update Message Status` writes it into `messages.error`, and a new
+   `Delivery Failed?` gate fires a Telegram alert (business name, phone,
+   real failure reason) the instant Meta reports one, instead of it only
+   being discoverable later by noticing an unexplained badge in the UI.
+4. **Proved WhatsApp media is re-fetchable after the fact.** Built a
+   temporary diagnostic chain (HTTP Request with `predefinedCredentialType:
+   whatsAppApi` → `GET https://graph.facebook.com/v22.0/{media-id}` → GET
+   the returned temporary URL → `extractFromFile` `binaryToPropery` to
+   base64) to pull yesterday's PDF and two voice notes down to disk and
+   send them to the user directly. Confirms the original webhook's
+   `lookaside.fbsbx.com` URL (expires ~5 min after issue) is NOT the only
+   way to get media — Meta will re-issue a fresh temporary URL from the
+   permanent media `id` for some retention window after the message was
+   received (worked fine ~31 hours later for this test). This is the
+   proven building block for item 1 in section 11. Diagnostic nodes were
+   added to `Ops Alerts — Telegram` as an unpublished draft, tested, then
+   removed — production/active version was never affected.
+
+## 11. Feature roadmap requested by user (2026-08-13) — NOT YET BUILT
+
+User asked for these explicitly, voice-dictated, and asked that everything
+built from here forward be documented as it happens (this section is that
+practice starting now — update it, don't let it go stale):
+
+1. **Sophie can read PDFs sent to her.** Needs: (a) the media-download
+   pipeline proven in section 10 item 4, made permanent in the inbound
+   workflow — auto-fetch on receipt rather than on-demand; (b) PDF text
+   extraction — `n8n-nodes-base.extractFromFile` operation `pdf` can pull
+   text directly, no LLM vision call needed for text-based PDFs (an
+   image-only/scanned PDF would need OCR instead, worth checking template
+   PDFs like the ones seen so far aren't scans); (c) feed the extracted
+   text into `Build AI Context` so `Draft Human-Like Reply` can actually
+   respond to what's in the document, not just acknowledge receipt.
+2. **Sophie can hear and understand voice notes.** Needs: (a) same
+   media-download pipeline as above for `audio`-type messages; (b) speech-
+   to-text — user mentioned Whisper explicitly; OpenAI's Whisper API
+   (`audio.transcriptions`) is the direct fit since OpenAI is already the
+   credentialed provider in this system (credential `aEiYYdLhZaR8efIk`) —
+   would need an HTTP Request node (n8n has no dedicated Whisper node,
+   would use `predefinedCredentialType: openAiApi` against
+   `https://api.openai.com/v1/audio/transcriptions`, multipart form body
+   with the downloaded `.ogg` file); (c) feed the transcript into
+   `Build AI Context` same as PDF text.
+3. **Dashboard shows every message type, not just text.** Needs: (a) the
+   download pipeline uploading fetched media to Supabase Storage (the
+   `assets` bucket already exists and already has an upload policy from
+   the manual-send file feature) so it has a permanent, publicly-servable
+   URL — `messages.media_url` needs to actually get populated, which it
+   currently never does for inbound media; (b) `MessageBubble.tsx` in the
+   dashboard needs new rendering branches for `image` (`<img>`), `document`
+   (PDF preview or download link), `audio` (`<audio controls>` — this also
+   covers "let me listen to voice notes" as an ongoing UI feature, not a
+   one-off pull like section 10 item 4), `video` (`<video controls>`); (c)
+   emoji: WhatsApp text messages already carry emoji as literal UTF-8
+   characters in `.text.body` — these should already render correctly
+   wherever plain message text is displayed already, worth a quick check
+   whether that's actually true before assuming it needs separate work.
+4. **Voice call attempts should be logged/noted.** WhatsApp Business
+   Calling API sends call-event webhooks (`call_connect`, `call_terminate`,
+   etc.) as a distinct payload shape, not under `messages` or `statuses` —
+   `Normalize Inbound Message` and `Has Real Message?` would need a new
+   branch to recognize and log these (e.g. as an `events` row and/or a
+   `message_type: 'other'` message row with body `[Voice call attempted]`)
+   instead of silently falling through unhandled as they would today.
+   Needs checking whether the WhatsApp Business phone number this system
+   uses actually has Calling API enabled at all before building this —
+   calling isn't on by default.
+
+None of section 11 has been started. Item 1 (media download → Supabase
+Storage → dashboard rendering) is the common foundation under items 1-3 and
+is the natural place to start if asked to proceed.
