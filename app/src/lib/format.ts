@@ -27,6 +27,9 @@ const STAGE_LABEL: Record<string, string> = {
   handed_off: 'Handed off',
   closed: 'Closed',
   unqualified: 'Unqualified',
+  deferred: 'Will follow up later',
+  automated_reply: 'Automated reply',
+  wrong_number: 'Wrong number',
 }
 
 export function stageLabel(stage: string): string {
@@ -44,9 +47,14 @@ export function stageColor(stage: string): string {
     case 'closed':
       return 'bg-neutral-700/40 text-neutral-400 border-neutral-600/40'
     case 'unqualified':
+    case 'wrong_number':
       return 'bg-red-500/10 text-red-400 border-red-500/30'
     case 'new':
       return 'bg-sky-500/20 text-sky-300 border-sky-500/40'
+    case 'deferred':
+      return 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30'
+    case 'automated_reply':
+      return 'bg-neutral-700/40 text-neutral-400 border-neutral-600/40'
     default:
       return 'bg-violet-500/20 text-violet-300 border-violet-500/40'
   }

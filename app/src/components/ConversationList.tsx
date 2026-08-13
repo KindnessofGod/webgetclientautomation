@@ -9,6 +9,8 @@ const FILTERS = [
   { key: 'no_reply', label: 'No reply yet' },
   { key: 'hot_lead', label: 'Hot leads' },
   { key: 'needs_reply', label: 'Needs reply' },
+  { key: 'deferred', label: 'Will follow up later' },
+  { key: 'automated_reply', label: 'Automated reply' },
   { key: 'handed_off', label: 'Handed off' },
   { key: 'unqualified', label: 'Unqualified' },
 ]
@@ -25,6 +27,8 @@ export default function ConversationList({ conversations }: { conversations: Con
     if (filter === 'replied' && !c.last_inbound_at) return false
     if (filter === 'no_reply' && c.last_inbound_at) return false
     if (filter === 'hot_lead' && c.stage !== 'hot_lead') return false
+    if (filter === 'deferred' && c.stage !== 'deferred') return false
+    if (filter === 'automated_reply' && c.stage !== 'automated_reply') return false
     if (filter === 'handed_off' && c.stage !== 'handed_off') return false
     if (filter === 'needs_reply' && !(c.last_message_direction === 'inbound' && !c.human_takeover)) return false
     if (query) {
