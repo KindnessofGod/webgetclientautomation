@@ -5,6 +5,86 @@ exhausted. Picking this up in a new tool/session (opencode or otherwise)?
 Read this whole file before touching anything — most of the state that
 matters lives in **n8n and Supabase, not in this git repo**.
 
+## 0. Lessons learned — read this before starting a similar project
+
+This section exists specifically so the *next* n8n + Supabase + WhatsApp (or
+similar) automation project doesn't re-discover these the hard way. These
+are general, reusable pitfalls, not specific to this campaign's business
+logic — everything else in this file is chronological project history;
+this section is the distilled "don't do this again" checklist.
+
+1. **Two IF/Switch branches wired to the same downstream node can silently
+   fail to fire, with no error.** This cost real customer replies (see
+   section 10, item 1) — the IF node correctly evaluated, but the shared
+   downstream node sometimes just didn't run, and the execution reported
+   "success" anyway. Don't converge two branches onto one node unless you
+   go through an explicit Merge node. If both branches are meant to do the
+   same thing, that's a sign the IF node shouldn't exist at all — remove it
+   and wire one unconditional path instead.
+2. **n8n silently auto-assigns credentials when creating/updating nodes
+   programmatically, and it can pick the wrong project.** This happened
+   *twice* in this project on different workflows (see section 9's fix
+   list and this session's watchdog build) — a brand-new Supabase node
+   defaulted to an unrelated "remote" credential instead of the actually-
+   correct one, with no warning surfaced anywhere except the
+   `autoAssignedCredentials` field in the API response. Check that field
+   on every node-creating call, every time, and explicitly set the
+   credential if it's not exactly right — don't trust the default.
+3. **`$json` is not stable after any node with error-handling or
+   transformation behavior runs.** A node with `onError:
+   'continueRegularOutput'` replaces `$json` entirely with the error object
+   on failure, silently wiping whatever was there before (cost a real send:
+   see section 6). HTTP/extract/transform nodes don't reliably pass
+   unrelated fields through either. Reference upstream data explicitly by
+   node name (`$("NodeName").item.json.field`) anywhere downstream of such
+   a node, rather than trusting implicit `$json` pass-through.
+4. **A workflow-level error-workflow (Telegram/Slack alert on exception)
+   only catches *thrown* errors.** A node that legitimately returns zero
+   output items because of a logic bug is NOT an exception — the execution
+   reports "success" and nothing pages anyone. This class of bug is
+   invisible to error-workflow alerting by design. For anything customer-
+   facing or revenue-critical, also build an independent watchdog that
+   queries actual database state on a schedule (e.g. "any conversation
+   whose last message is an unanswered inbound reply older than N
+   minutes?") rather than trusting the workflow's own opinion of whether it
+   succeeded.
+5. **WhatsApp Cloud API: you cannot send free-text as the first message to
+   a number that has never messaged you.** Business-initiated contact must
+   use a pre-approved message template (Meta's 24-hour customer-service-
+   window rule). This matters for any "reach out to a new/referred number"
+   flow — plan for template approval lead time, it isn't instant.
+6. **Prove new integrations against a real execution before publishing,
+   not just against documentation.** This project's working pattern: add
+   temporary "TEMP" nodes to a disposable sandbox workflow (this project
+   used the "Ops Alerts — Telegram" workflow), run them for real against
+   live credentials, inspect the actual `get_execution` output (not just
+   "did it error"), then remove the temp nodes. Caught real issues
+   (wrong field names, empty extraction results) that documentation alone
+   wouldn't have surfaced.
+7. **Non-text webhook payloads each have a different JSON shape.** WhatsApp
+   messages carry `type: "image"|"document"|"audio"|"video"|"interactive"|
+   "location"|"contacts"|"reaction"|"sticker"`, each with different nested
+   fields — assuming everything has `.text.body` silently turns every
+   non-text message into an empty string downstream (see section 10, item
+   2). Normalize explicitly per type immediately after the trigger node.
+8. **A debounce window alone does not prevent duplicate sends under real
+   race conditions.** Bursty user input (someone typing several WhatsApp
+   bubbles in a row) can spawn multiple concurrent executions even with a
+   debounce window bundling them, if messages are spaced further apart than
+   the window or arrive at its edge. Needed both: a debounce window
+   (reduces how often bursts spawn parallel work) AND an atomic
+   claim/idempotency lock immediately before the actual send (re-check
+   "is this still the freshest unanswered message" via a conditional DB
+   update, proceed only if it matched a row). See section 9 for the full
+   sequence of fixes this took to get right.
+9. **A "stop the AI" / human-takeover signal needs to be re-checked
+   immediately before every send, not just once at the start.** Long
+   in-flight delays (simulated typing delay, debounce windows) create a
+   real window where a human clicking "take over this chat" doesn't
+   actually stop an AI reply that's already most of the way through
+   sending. Re-fetch and re-check the takeover flag right before each send
+   action, not only when the execution started.
+
 ## 1. What this system is
 
 Cold-outreach automation: WhatsApp Cloud API (Meta) + Supabase (DB) + n8n
