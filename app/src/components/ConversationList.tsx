@@ -6,6 +6,7 @@ import { timeAgo, stageColor, stageLabel } from '../lib/format'
 const FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'replied', label: 'Replied' },
+  { key: 'no_reply', label: 'No reply yet' },
   { key: 'hot_lead', label: 'Hot leads' },
   { key: 'needs_reply', label: 'Needs reply' },
   { key: 'handed_off', label: 'Handed off' },
@@ -22,6 +23,7 @@ export default function ConversationList({ conversations }: { conversations: Con
     if (filter !== 'unqualified' && c.stage === 'unqualified') return false
     if (filter === 'unqualified' && c.stage !== 'unqualified') return false
     if (filter === 'replied' && !c.last_inbound_at) return false
+    if (filter === 'no_reply' && c.last_inbound_at) return false
     if (filter === 'hot_lead' && c.stage !== 'hot_lead') return false
     if (filter === 'handed_off' && c.stage !== 'handed_off') return false
     if (filter === 'needs_reply' && !(c.last_message_direction === 'inbound' && !c.human_takeover)) return false
