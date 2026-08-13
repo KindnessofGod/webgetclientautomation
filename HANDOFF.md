@@ -510,3 +510,39 @@ log. Nothing was built. If Calling is enabled later, `Normalize Inbound
 Message`/`Has Real Message?` would need a new branch to recognize the
 distinct call-event payload shape (not nested under `messages` or
 `statuses`) and log it as an `events` row.
+
+## 13. Bug fix — inbound trigger timeout (2026-08-13, post-publish)
+
+Telegram ops alert fired: `WhatsApp Inbound Event` node, "operation timed
+out for an unknown reason" (execution 2416). Investigated via
+`get_execution` with full data — **not** a bug in the new media pipeline.
+The stack trace is entirely inside n8n's own internals
+(`CredentialsHelper.getCredentialsEntity` → `SqliteReadonlyConnectionPool`
+→ `tarn` connection-pool timeout): n8n's self-hosted instance uses SQLite
+for its own internal store (credentials/executions/workflow state,
+separate from the Supabase app database), and under load that pool can
+briefly lock up before the trigger node even reads the incoming webhook
+body — so the execution errors out at 71ms with an empty payload, before
+any lead/message logic runs. Checked recent history:
+`search_executions` showed this same failure mode once on 2026-08-11 and
+once on 2026-08-13; a separate, already-resolved cluster on 2026-08-12
+(executions 1241–1248) was a stale-PostgREST-schema-cache issue on the
+Supabase side, not this.
+
+Since the WhatsApp trigger node had no retry settings at all, any one of
+these transient internal-DB blips outright drops that inbound webhook
+delivery (Meta may or may not retry it). Fix: added `retryOnFail: true,
+maxTries: 3, waitBetweenTries: 2000` to the `WhatsApp Inbound Event` node
+via `update_workflow`'s `setNodeSettings` operation, then published
+(`activeVersionId 24c540e7-a327-442a-b7d0-b6c067d2ef2c`). This gives a
+transient SQLite pool contention up to ~4 seconds and 2 extra attempts to
+clear before the execution actually fails and alerts.
+
+Not fixed (out of scope for this session, needs host-level access this
+session doesn't have): the underlying cause is SQLite as n8n's internal
+DB under concurrent load — several inbound webhooks landing close
+together, some sitting in a 10s `Debounce Burst Window` Wait node, appear
+to be enough to contend the pool. n8n's own docs recommend Postgres (or
+queue mode) as the internal DB backend for higher-throughput self-hosted
+deployments; if this alert recurs frequently even with the retry in
+place, that's the next lever, not another workflow-level change.
