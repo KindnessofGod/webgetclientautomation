@@ -414,3 +414,99 @@ practice starting now — update it, don't let it go stale):
 None of section 11 has been started. Item 1 (media download → Supabase
 Storage → dashboard rendering) is the common foundation under items 1-3 and
 is the natural place to start if asked to proceed.
+
+## 12. Feature roadmap — BUILT (2026-08-13, same day as section 11)
+
+All of section 11 was implemented and published live the same day it was
+requested, except voice-call logging (confirmed not applicable — see item 4).
+
+**Migration** `add_video_message_type`: added `'video'` to the
+`messages.message_type` check constraint (was previously
+text/template/document/image/audio/other only).
+
+**n8n (`WA Inbound — Reply Handler`, `If8jiQRRvIm6Zyks`) — new media
+pipeline**, inserted between `Normalize Inbound Message` and
+`Has Real Message?`:
+
+1. `Normalize Inbound Message` gained 3 new fields: `waRawType` (the real
+   WhatsApp message type string), `waMediaId` (the media object's `id`,
+   whichever of image/document/audio/video/sticker is present), and
+   `waMediaFilename` (document filename if any). `inboundMessageType` now
+   also maps `video` → `"video"` instead of collapsing into `"other"`.
+2. `Has Media?` (IF, checks `waMediaId` truthy) branches into the fetch
+   chain or straight to `Set No Media` (plain text/interactive/etc., no
+   change in behavior).
+3. Fetch chain: `Get Media Info` (Graph API `GET /v22.0/{media-id}` →
+   `{url, mime_type, ...}`, `whatsAppApi` credential) → `Compute Storage
+   Path` (Code node, builds `inbound-media/{phone}/{waMessageId}.{ext}`
+   from the mime type) → `Download Media Binary` (HTTP GET the temp url,
+   `responseFormat: file`). From there it fans out to two independent
+   branches (same binary, two consumers — this does NOT reproduce the
+   two-outputs-of-one-IF-node convergence bug from section 10; this is the
+   already-proven "N different upstream nodes → same target" pattern used
+   elsewhere in this workflow, e.g. `Compute Human Typing Delay`):
+   - **Branch A** — `Upload To Storage` (HTTP POST to Supabase Storage
+     REST API, `assets` bucket, `supabaseApi` credential — service-role
+     key bypasses the bucket's RLS policy which is otherwise scoped to
+     `manual-sends/` only) → `Set Media URL` (builds the public URL).
+   - **Branch B** — type-specific enrichment: `Is Document?` →
+     `Extract PDF Text` (`extractFromFile`, op `pdf`, output field
+     confirmed as `.text` via live test) → `Set Enriched Body (Doc)`
+     (`"[Document: name] <extracted text, first 6000 chars>"`, falls back
+     to "(no extractable text — likely a scanned/image PDF)" if empty).
+     `Is Audio?` → `Transcribe Voice Note` (`@n8n/n8n-nodes-langchain.openAi`,
+     resource `audio` op `transcribe` = Whisper, `openAiApi` credential,
+     output field confirmed as `.text` via live test) → `Set Enriched Body
+     (Audio)` (`"[Voice message] <transcript>"`). Neither doc nor audio →
+     `Set Enriched Body (Other Media)` (image/video/sticker: keeps
+     Normalize's placeholder text, e.g. `[Image]`).
+   - `Sync Media Result` (Merge, `combine`/`combineByPosition`) joins
+     branch A + branch B back into one item before continuing to
+     `Has Real Message?`. Every terminal node in both branches explicitly
+     rebuilds `messages`/`phoneE164`/`waMessageId` via
+     `$("Normalize Inbound Message").item.json.X` (not passthrough) —
+     HTTP/extract/transcribe nodes don't reliably preserve unrelated input
+     fields, so relying on passthrough would have silently broken
+     `Has Real Message?`'s `$json.messages` check for every media message.
+4. `Log Inbound Message` and `Split Latest Message Burst` (the debounce
+   fallback) now read `inboundBody`/`inboundMessageType`/`waMessageId`/
+   `mediaUrl` from `$("Has Real Message?")` — the one node every branch
+   converges through — instead of `$("Normalize Inbound Message")`, which
+   never saw the enriched values. `Log Inbound Message` also gained a new
+   `media_url` field mapping.
+5. Published as `activeVersionId c254b055-7d47-4d48-bc21-37b2d890f688`.
+
+**Live-tested before publish** (not simulated): reused real, still-valid
+Meta media IDs recovered from this session's earlier diagnostic run
+(`inbound-media` docs/voice notes fetched ~2h earlier) in a temporary
+scratch chain inside `Ops Alerts — Telegram` (same safe unpublished-draft
+pattern as section 10 item 4; cleaned up after). Confirmed live: Supabase
+Storage upload succeeds with the `supabaseApi` credential (service role
+bypasses the `manual-sends/`-only RLS policy — no policy change needed),
+Whisper transcription succeeds and returns real text, PDF extraction
+mechanism works (confirmed `.text` field) though the one real PDF tested
+happened to have no extractable text layer (image/vector export) — the
+"likely a scanned/image PDF" fallback path is what will actually show for
+that document going forward, which is correct behavior, not a bug. Full
+workflow structural validation (`update_workflow`'s built-in validation)
+came back clean for every new node/connection.
+
+**Dashboard** (`app/src/components/MessageBubble.tsx`): now renders
+`image` as `<img>`, `video` as `<video controls>`, `audio` as
+`<audio controls>` with the transcript shown as a caption underneath, and
+`document` as a short filename link with the extracted text shown as a
+clamped 4-line preview below it (previously the full extracted text would
+have rendered as the link's own label — split out via a
+`splitDocumentBody()` helper). Emoji needed no work — WhatsApp text
+messages already carry emoji as literal UTF-8 in `.text.body`, which
+already renders correctly wherever message text is displayed.
+`database.types.ts` updated with `'video'` in the `message_type` union.
+
+**Voice call logging — checked, not applicable.** Queried Meta's Graph API
+directly (`GET /v22.0/{phone-number-id}/settings`) and confirmed
+`calling.status: "NOT_SET"` — the WhatsApp Business Calling API is not
+enabled on this number, so there is no call-event webhook to receive or
+log. Nothing was built. If Calling is enabled later, `Normalize Inbound
+Message`/`Has Real Message?` would need a new branch to recognize the
+distinct call-event payload shape (not nested under `messages` or
+`statuses`) and log it as an `events` row.

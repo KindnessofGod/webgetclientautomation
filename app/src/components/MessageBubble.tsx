@@ -1,6 +1,15 @@
 import type { Message } from '../lib/database.types'
 import { clockTime } from '../lib/format'
 
+// Inbound documents store "[Document: filename] <extracted text>" in body — split
+// the bracketed label from the (potentially very long) extracted text so the
+// bubble shows a short link plus a clamped preview instead of a wall of text.
+function splitDocumentBody(body: string | null): { label: string; preview: string } {
+  const match = body?.match(/^\[Document: ([^\]]*)\]\s*(.*)$/s)
+  if (match) return { label: match[1] || 'Document', preview: match[2] }
+  return { label: body || 'Document', preview: '' }
+}
+
 export default function MessageBubble({ message }: { message: Message }) {
   const isOut = message.direction === 'outbound'
   const senderLabel = message.sent_by === 'ai' ? 'AI' : message.sent_by === 'human' ? 'You' : null
@@ -12,10 +21,37 @@ export default function MessageBubble({ message }: { message: Message }) {
           isOut ? 'bg-emerald-700/40 text-emerald-50' : 'bg-neutral-800 text-neutral-100'
         }`}
       >
-        {message.message_type === 'document' && message.media_url ? (
-          <a href={message.media_url} target="_blank" rel="noreferrer" className="underline text-sky-300">
-            📎 {message.body || 'Document'}
+        {message.message_type === 'image' && message.media_url ? (
+          <a href={message.media_url} target="_blank" rel="noreferrer">
+            <img
+              src={message.media_url}
+              alt={message.body || 'Image'}
+              loading="lazy"
+              className="max-w-full max-h-72 rounded-md"
+            />
           </a>
+        ) : message.message_type === 'video' && message.media_url ? (
+          <video controls preload="metadata" className="max-w-full max-h-72 rounded-md">
+            <source src={message.media_url} />
+          </video>
+        ) : message.message_type === 'audio' && message.media_url ? (
+          <div className="min-w-[240px]">
+            <audio controls preload="metadata" className="w-full h-10">
+              <source src={message.media_url} />
+            </audio>
+            {message.body && <p className="text-xs opacity-70 mt-1 whitespace-pre-wrap">{message.body}</p>}
+          </div>
+        ) : message.message_type === 'document' && message.media_url ? (
+          <div>
+            <a href={message.media_url} target="_blank" rel="noreferrer" className="underline text-sky-300">
+              📎 {splitDocumentBody(message.body).label}
+            </a>
+            {splitDocumentBody(message.body).preview && (
+              <p className="text-xs opacity-70 mt-1 whitespace-pre-wrap line-clamp-4">
+                {splitDocumentBody(message.body).preview}
+              </p>
+            )}
+          </div>
         ) : (
           <p>{message.body}</p>
         )}

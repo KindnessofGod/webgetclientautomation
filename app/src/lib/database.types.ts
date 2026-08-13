@@ -49,7 +49,7 @@ export interface Message {
   lead_id: string
   direction: 'inbound' | 'outbound'
   wa_message_id: string | null
-  message_type: 'text' | 'template' | 'document' | 'image' | 'audio' | 'other'
+  message_type: 'text' | 'template' | 'document' | 'image' | 'audio' | 'video' | 'other'
   body: string | null
   media_url: string | null
   template_name: string | null
