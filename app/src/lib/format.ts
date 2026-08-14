@@ -30,6 +30,8 @@ const STAGE_LABEL: Record<string, string> = {
   deferred: 'Will follow up later',
   automated_reply: 'Automated reply',
   wrong_number: 'Wrong number',
+  redirect_pending: 'Redirect: awaiting referrer name',
+  redirected: 'Redirected to new contact',
 }
 
 export function stageLabel(stage: string): string {
@@ -55,6 +57,10 @@ export function stageColor(stage: string): string {
       return 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30'
     case 'automated_reply':
       return 'bg-neutral-700/40 text-neutral-400 border-neutral-600/40'
+    case 'redirect_pending':
+      return 'bg-orange-500/10 text-orange-400 border-orange-500/30'
+    case 'redirected':
+      return 'bg-sky-500/10 text-sky-400 border-sky-500/30'
     default:
       return 'bg-violet-500/20 text-violet-300 border-violet-500/40'
   }

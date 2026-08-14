@@ -626,3 +626,146 @@ to be enough to contend the pool. n8n's own docs recommend Postgres (or
 queue mode) as the internal DB backend for higher-throughput self-hosted
 deployments; if this alert recurs frequently even with the retry in
 place, that's the next lever, not another workflow-level change.
+
+## 14. Silent-drop incident review (2026-08-13/14) — root cause, watchdog,
+wrong-number tagging, redirect flow — BUILT
+
+User reported real conversations where Sophie either never replied at all,
+or replied with a generic pitch to someone who'd already said this was the
+wrong contact. Investigated via direct SQL against `messages`/`conversations`
+rather than trusting the reported examples as exhaustive — found **9** leads
+silently dropped, not the 3 the user had examples for. Root cause: the
+already-known n8n bug (section 0, pitfall 1) where two IF/Switch branches
+wired directly to the same downstream node can silently fail — present in
+an older part of the routing graph. All 9 backfilled by hand; the
+underlying branch-convergence pattern was already being avoided in new work
+via explicit Merge nodes / single-Switch-output wiring (see the bot-
+detection gate built earlier the same day, and everything in this section).
+
+**Watchdog — `Watchdog — Stale Unanswered Replies` (`E9CLPYYj6AKhvMug`,
+new workflow).** Independent safety net, not dependent on the main
+workflow's own logic being correct: Schedule Trigger (5 min) → Supabase
+`getAll` on a new view `stale_unanswered_conversations` (latest message is
+inbound, `ai_enabled`, not `human_takeover`, `minutes_since >= 20`) →
+Telegram alert with business name/phone/stage/their actual message.
+**Duplicate-alert bug found and fixed same day**: the watchdog had no
+dedup, so it re-alerted the same unresolved message every 5-minute cycle
+indefinitely (one lead, "Ki Bar and Kitchen", alerted ~8 times) — user
+caught this from the noise. Fixed with `messages.stale_alerted_at
+timestamptz null` (migration `add_stale_alerted_at_dedup`) + a `stale_alerted_at
+is null` filter on the view query + a new terminal node `Mark Stale Alert
+Sent` that sets it after alerting. **Lesson repeated from section 0 pitfall
+9, learned the hard way a second time in the same session**: testing this
+fix via `execute_workflow` in manual (non-pinned) mode fired 9 real
+Telegram alerts, because manual/non-pinned execution has real external side
+effects — same mistake as before, on a different node this time. Do not run
+`execute_workflow` against any node with a real external side effect
+(Telegram send, WhatsApp send, DB write) without pinning test data first or
+asking the user, full stop — the cost of getting this wrong is a real
+message going out.
+
+**Wrong-number tagging.** `Route By Intent` previously routed `confirm_no`
+(flat "wrong number/business" replies with no alternate contact offered)
+into the same catch-all fallback as generic `other` messages — so those
+conversations replied correctly but never got tagged, staying stuck at
+whatever stage they were in before, forever. Gave `confirm_no` its own
+Switch rule → new node `Update Stage: Wrong Number` (sets
+`conversations.stage = 'wrong_number'`) → continues into the same shared
+reply-send pipeline as every other branch (`Compute Human Typing Delay`).
+3 pre-existing backlogged conversations found via a text-pattern SQL
+search over apology-style outbound replies and backfilled by hand (Velvet
+Apparel, Mysolar Energy Ltd → `wrong_number`; The Heritage Specialist
+Clinics → `unqualified`, since "the business has closed" is a different
+situation, not a wrong number — the text-pattern search over-matched and
+this one needed manual judgment, worth remembering if repeating this kind
+of backfill search).
+
+**Redirect flow ("Cassy's Signature" case) — full design spec from user,
+built same day.** The distinguishing case: someone says a number is wrong
+*and* gives a different number to reach the right contact — this needs to
+actually message the new number, not just apologize. WhatsApp Cloud API
+requires a pre-approved template for the first message to any brand-new
+number (24h customer-service-window rule), so this cannot be a raw AI
+freeform message; it has to go through the same approved-template path
+every other first contact uses.
+
+Design (as specified by the user): acknowledge the old contact, ask for
+*their* name so the new contact can be told who referred them; if given,
+mention it to the new contact ("got your number from X") in the pitch; if
+declined, proceed anyway with the normal process, no referral mention; if
+the new contact asks how we got their number, or the old contact asks how
+we got theirs, the answer is "Google". Also needed: a durable marker for
+wrong-number leads (see previous item) — done first since it's simpler and
+this flow builds on it.
+
+Implementation, entirely inside `WA Inbound — Reply Handler`
+(`If8jiQRRvIm6Zyks`), plus reusing the *existing* `WA Outbound —
+First-Touch Sender` (`z3KarZgzcxfB1azz`) rather than duplicating its
+template-send/pacing/daily-cap logic:
+
+- **Migration** `add_redirect_flow_support`: `conversations
+  .pending_redirect_phone text null` (holds the extracted new number
+  between the two conversation turns this spans), `leads.referred_by_name
+  text null` (read later by the AI when the new lead replies), and
+  `'redirect_pending'` / `'redirected'` added to `conversations.stage`.
+- **AI classifier** (`Draft Human-Like Reply` system prompt + `Reply
+  Schema` structured output): two new intents. `redirect` — wrong number
+  *with* an alternate number given; extracts it into a `redirectPhone`
+  output field. `redirect_name_reply` — **context-dependent on conversation
+  history**, not a DB stage gate: only fires when the AI's own previous
+  message was the "what's your name" ask (same pattern this system already
+  uses everywhere else — PDF-sent, already-greeted, Kindness-already-
+  introduced are all detected by scanning history text, not flags — kept
+  consistent rather than introducing a new gating mechanism). Extracts
+  `referrerName` (or null if declined). Also added a general "if asked how
+  we got their number, say Google" rule, and taught `confirm_yes`'s reply
+  rule to open with a referral mention instead of the generic thanks when
+  `Build AI Context`'s new `referredByName` field (read from
+  `leads.referred_by_name`) is set.
+- **Routing** (`Route By Intent`, Switch node): two new rules,
+  `redirect` → `Normalize Redirect Phone` (Code node, best-effort E.164
+  normalization of whatever digits the AI extracted) → `Store Pending
+  Redirect` (Supabase update: `pending_redirect_phone`, `stage =
+  'redirect_pending'`) → rejoins the shared `Compute Human Typing Delay`
+  send pipeline. `redirect_name_reply` → `Extract Redirect Context` (Code
+  node: reads back `pending_redirect_phone` from `Find Conversation For
+  Lead`, validates it against `/^\+\d{10,15}$/`) → `Redirect Phone Valid?`
+  (IF) → **true**: `Create Redirected Lead` (Supabase insert into `leads`,
+  `status: 'queued'`, `source: 'redirect'`, `referred_by_name` set,
+  `onError: continueRegularOutput` so a duplicate-phone unique-constraint
+  hit degrades gracefully instead of failing the execution) — **false**:
+  `Alert Kindness: Redirect Manual Follow-up` (Telegram, for when
+  normalization couldn't produce a valid number — never silently drops
+  it) — both converge into `Mark Old Conversation Redirected` (Supabase
+  update: `stage = 'redirected'`, clears `pending_redirect_phone`) → same
+  shared send pipeline. All new Switch-branch convergences onto shared
+  downstream nodes follow the pattern already proven safe elsewhere in
+  this workflow (mutually-exclusive Switch outputs fanning into one node
+  is fine; the known bug is specifically about two IF true/false outputs
+  both wired to one node, not this).
+- **Why queue instead of sending the template directly from this
+  workflow**: inserting `leads.status = 'queued'` lets the existing,
+  already-tested `WA Outbound — First-Touch Sender` pick it up on its next
+  10-minute cycle — same daily cap, send-window, and jitter protections as
+  every other first-touch send, and no duplicated Meta API call logic to
+  keep in sync across two workflows.
+- Published as `activeVersionId 384acfe8-23a7-41de-a9df-60b02890a866`
+  (wrong-number fix published separately first, then this, at
+  `596c6773-8aa9-435b-b025-bbaf9481fedf`).
+- **Dashboard**: `redirect_pending` / `redirected` added to
+  `STAGE_LABEL`/`stageColor` in `format.ts` so they render instead of
+  falling through to the generic default styling.
+
+**Not live-tested before publish** — unlike section 12's media pipeline,
+this could not be proven against a real execution first: `execute_workflow`
+explicitly refuses to start a `whatsAppTrigger`-based workflow (only
+Schedule/Webhook/Form/Chat/Manual triggers are startable that way), and
+building full realistic pin data for `test_workflow` across this many
+nodes without derivable schema was judged not worth the cost, same
+tradeoff made earlier in the session for the bot-detection gate. Verified
+instead by re-fetching the published graph and checking every connection,
+Switch rule, and field expression matches the intended design. **Still
+needs a real end-to-end test**: one message giving a wrong number + an
+alternate number, a follow-up giving a name, and confirming the new lead
+actually gets the template sent by the First-Touch Sender and later
+mentions the referral correctly.
